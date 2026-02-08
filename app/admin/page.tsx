@@ -28,6 +28,8 @@ import {
   getTeamMembers,
   getTeamCategories,
   createTeamMember,
+  updateTeamMember,
+  updateTeamOrder,
   deleteTeamMember,
   createTeamCategory,
   deleteTeamCategory,
@@ -49,7 +51,16 @@ import {
   Trash2,
   RefreshCw,
   Users,
+  Pencil,
+  GripVertical,
 } from "lucide-react";
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+  DialogFooter,
+} from "@/components/ui/dialog";
 
 // --- Sipariş yardımcıları ---
 function OrderContent({ items }: { items: OrderItemsJSON }) {
@@ -548,6 +559,20 @@ function AdminTeamTab({
   const [addingCategory, setAddingCategory] = React.useState(false);
   const [deletingMemberId, setDeletingMemberId] = React.useState<string | null>(null);
   const [deletingCategoryId, setDeletingCategoryId] = React.useState<string | null>(null);
+  const [editingMember, setEditingMember] = React.useState<TeamMemberRow | null>(null);
+  const [updatingMember, setUpdatingMember] = React.useState(false);
+  const [draggedItem, setDraggedItem] = React.useState<{ type: "category" | "member"; id: string } | null>(null);
+  const [reordering, setReordering] = React.useState(false);
+
+  const uncategorizedMembers = React.useMemo(
+    () => members.filter((m) => !m.category_id),
+    [members]
+  );
+  const combinedList = React.useMemo(() => {
+    const catItems = categories.map((c) => ({ type: "category" as const, id: c.id, data: c }));
+    const memItems = uncategorizedMembers.map((m) => ({ type: "member" as const, id: m.id, data: m }));
+    return [...catItems, ...memItems].sort((a, b) => a.data.sort_order - b.data.sort_order);
+  }, [categories, uncategorizedMembers]);
 
   const handleAddCategory = async (e: React.FormEvent<HTMLFormElement>) => {
     e.preventDefault();
@@ -619,6 +644,52 @@ function AdminTeamTab({
     }
   };
 
+  const handleEditMember = async (e: React.FormEvent<HTMLFormElement>) => {
+    if (!editingMember) return;
+    e.preventDefault();
+    const form = e.currentTarget;
+    const formData = new FormData(form);
+    setUpdatingMember(true);
+    try {
+      const result = await updateTeamMember(editingMember.id, formData);
+      if (result.ok) {
+        toast.success("Ekip üyesi güncellendi.");
+        setEditingMember(null);
+        onRefreshMembers();
+      } else {
+        toast.error(result.error ?? "Güncellenemedi.");
+      }
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Bir hata oluştu.");
+    } finally {
+      setUpdatingMember(false);
+    }
+  };
+
+  const handleTeamOrderDrop = React.useCallback(
+    async (draggedType: "category" | "member", draggedId: string, toType: "category" | "member", toId: string) => {
+      if (draggedType === toType && draggedId === toId) return;
+      const fromIndex = combinedList.findIndex((x) => x.type === draggedType && x.id === draggedId);
+      const toIndex = combinedList.findIndex((x) => x.type === toType && x.id === toId);
+      if (fromIndex === -1 || toIndex === -1) return;
+      const newList = [...combinedList];
+      const [removed] = newList.splice(fromIndex, 1);
+      newList.splice(toIndex, 0, removed);
+      const newOrder = newList.map((x) => ({ type: x.type, id: x.id }));
+      setReordering(true);
+      const result = await updateTeamOrder(newOrder);
+      setReordering(false);
+      if (result.ok) {
+        toast.success("Sıra kaydedildi.");
+        onRefreshCategories();
+        onRefreshMembers();
+      } else {
+        toast.error(result.error ?? "Sıra güncellenemedi.");
+      }
+    },
+    [combinedList, onRefreshCategories, onRefreshMembers]
+  );
+
   return (
     <div className="space-y-10">
       {/* Kategoriler (gruplar / bantlar) */}
@@ -628,6 +699,18 @@ function AdminTeamTab({
         </CardHeader>
         <CardContent>
           <form onSubmit={handleAddCategory} className="grid gap-4 sm:grid-cols-2">
+            <div className="space-y-2">
+              <Label htmlFor="category-section">Bölüm</Label>
+              <select
+                id="category-section"
+                name="section"
+                required
+                className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+              >
+                <option value="yonetim">Yönetim Ekibi</option>
+                <option value="sanatci">Sanatçılar</option>
+              </select>
+            </div>
             <div className="space-y-2">
               <Label htmlFor="category-name">Kategori adı</Label>
               <Input
@@ -657,39 +740,6 @@ function AdminTeamTab({
         </CardContent>
       </Card>
 
-      {categories.length > 0 && (
-        <div>
-          <h3 className="mb-2 font-semibold">Kategori listesi</h3>
-          <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
-            {categories.map((c) => (
-              <Card key={c.id} className="overflow-hidden">
-                <div className="aspect-[3/4] relative bg-muted">
-                  {c.image_url ? (
-                    <img src={c.image_url} alt={c.name} className="size-full object-cover" />
-                  ) : (
-                    <div className="flex size-full items-center justify-center text-muted-foreground">
-                      <Users className="size-12" />
-                    </div>
-                  )}
-                </div>
-                <CardContent className="p-3 flex items-center justify-between gap-2">
-                  <p className="font-medium truncate">{c.name}</p>
-                  <Button
-                    size="sm"
-                    variant="ghost"
-                    className="text-destructive shrink-0"
-                    onClick={() => handleDeleteCategory(c.id)}
-                    disabled={deletingCategoryId === c.id}
-                  >
-                    {deletingCategoryId === c.id ? <Loader2 className="size-4 animate-spin" /> : <Trash2 className="size-4" />}
-                  </Button>
-                </CardContent>
-              </Card>
-            ))}
-          </div>
-        </div>
-      )}
-
       {/* Ekip üyesi ekle */}
       <Card>
         <CardHeader>
@@ -698,21 +748,29 @@ function AdminTeamTab({
         <CardContent>
           <form onSubmit={handleAddMember} className="grid gap-4 sm:grid-cols-2">
             <div className="space-y-2">
+              <Label htmlFor="team-section">Bölüm</Label>
+              <select
+                id="team-section"
+                name="section"
+                required
+                className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+              >
+                <option value="yonetim">Yönetim Ekibi</option>
+                <option value="sanatci">Sanatçılar</option>
+              </select>
+            </div>
+            <div className="space-y-2">
               <Label htmlFor="team-category">Kategori</Label>
               <select
                 id="team-category"
                 name="category_id"
-                required
                 className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
               >
-                <option value="">Seçin...</option>
+                <option value="">Kategorisiz</option>
                 {categories.map((c) => (
                   <option key={c.id} value={c.id}>{c.name}</option>
                 ))}
               </select>
-              {categories.length === 0 && (
-                <p className="text-xs text-muted-foreground">Önce bir kategori ekleyin.</p>
-              )}
             </div>
             <div className="space-y-2">
               <Label htmlFor="team-name">İsim</Label>
@@ -744,7 +802,7 @@ function AdminTeamTab({
               />
             </div>
             <div className="flex items-end">
-              <Button type="submit" disabled={addingMember || categories.length === 0}>
+              <Button type="submit" disabled={addingMember}>
                 {addingMember ? <Loader2 className="size-4 animate-spin" /> : "Ekle"}
               </Button>
             </div>
@@ -752,48 +810,229 @@ function AdminTeamTab({
         </CardContent>
       </Card>
 
-      <div>
-        <h3 className="mb-2 font-semibold">Ekip listesi</h3>
-        {members.length === 0 ? (
-          <p className="text-muted-foreground">Henüz ekip üyesi yok.</p>
-        ) : (
-          <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
-            {members.map((m) => (
-              <Card key={m.id} className="overflow-hidden">
-                <div className="aspect-[3/4] relative bg-muted">
-                  {m.image_url ? (
-                    <img
-                      src={m.image_url}
-                      alt={m.name}
-                      className="size-full object-cover"
-                    />
-                  ) : (
-                    <div className="flex size-full items-center justify-center text-muted-foreground">
-                      <Users className="size-12" />
-                    </div>
-                  )}
+      <Dialog open={!!editingMember} onOpenChange={(open) => !open && setEditingMember(null)}>
+          <DialogContent className="max-w-lg max-h-[90vh] overflow-y-auto">
+            <DialogHeader>
+              <DialogTitle>Ekip üyesini düzenle</DialogTitle>
+            </DialogHeader>
+            {editingMember && (
+              <form
+                key={editingMember.id}
+                id="edit-member-form"
+                onSubmit={handleEditMember}
+                className="grid gap-4 sm:grid-cols-2"
+              >
+                <div className="space-y-2">
+                  <Label htmlFor="edit-section">Bölüm</Label>
+                  <select
+                    id="edit-section"
+                    name="section"
+                    required
+                    defaultValue={editingMember.section}
+                    className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                  >
+                    <option value="yonetim">Yönetim Ekibi</option>
+                    <option value="sanatci">Sanatçılar</option>
+                  </select>
                 </div>
-                <CardContent className="p-3">
-                  <div className="flex items-center justify-between gap-2">
-                    <p className="font-medium truncate">{m.name}</p>
-                    <Button
-                      size="sm"
-                      variant="ghost"
-                      className="text-destructive hover:text-destructive shrink-0"
-                      onClick={() => handleDeleteMember(m.id)}
-                      disabled={deletingMemberId === m.id}
-                    >
-                      {deletingMemberId === m.id ? (
-                        <Loader2 className="size-4 animate-spin" />
-                      ) : (
-                        <Trash2 className="size-4" />
-                      )}
-                    </Button>
+                <div className="space-y-2">
+                  <Label htmlFor="edit-category">Kategori</Label>
+                  <select
+                    id="edit-category"
+                    name="category_id"
+                    defaultValue={editingMember.category_id ?? ""}
+                    className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                  >
+                    <option value="">Kategorisiz</option>
+                    {categories.map((c) => (
+                      <option key={c.id} value={c.id}>{c.name}</option>
+                    ))}
+                  </select>
+                </div>
+                <div className="space-y-2 sm:col-span-2">
+                  <Label htmlFor="edit-name">İsim</Label>
+                  <Input
+                    id="edit-name"
+                    name="name"
+                    required
+                    defaultValue={editingMember.name}
+                    placeholder="Ad Soyad"
+                  />
+                </div>
+                <div className="space-y-2 sm:col-span-2">
+                  <Label htmlFor="edit-bio">Kişi hakkında (detay)</Label>
+                  <Textarea
+                    id="edit-bio"
+                    name="bio"
+                    rows={4}
+                    defaultValue={editingMember.bio ?? ""}
+                    placeholder="Bu kişinin rolü, kısa tanıtım..."
+                  />
+                </div>
+                <div className="space-y-2 sm:col-span-2">
+                  <Label htmlFor="edit-image">Yeni fotoğraf (değiştirmek için seçin, boş bırakırsanız mevcut kalır)</Label>
+                  <Input
+                    id="edit-image"
+                    name="image"
+                    type="file"
+                    accept="image/*"
+                    className="cursor-pointer"
+                  />
+                </div>
+                <DialogFooter className="sm:col-span-2">
+                  <Button
+                    type="button"
+                    variant="outline"
+                    onClick={() => setEditingMember(null)}
+                  >
+                    İptal
+                  </Button>
+                  <Button type="submit" disabled={updatingMember}>
+                    {updatingMember ? <Loader2 className="size-4 animate-spin" /> : "Kaydet"}
+                  </Button>
+                </DialogFooter>
+              </form>
+            )}
+          </DialogContent>
+        </Dialog>
+
+        <div>
+        <h3 className="mb-2 font-semibold">Kategoriler ve kategorisiz üyeler</h3>
+        {combinedList.length === 0 ? (
+          <p className="text-muted-foreground">Henüz kategori veya kategorisiz ekip üyesi yok. Yukarıdan ekleyin; sıralamak için sürükleyip bırakın.</p>
+        ) : (
+          <>
+            <p className="mb-2 text-sm text-muted-foreground">Sıralamak için tutamacından sürükleyip bırakın. Kategorileri kategorisiz üyelerin önüne alabilirsiniz. Ekibimiz sayfasında bu sıra kullanılır.</p>
+            <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+              {combinedList.map((item) => {
+                const isCategory = item.type === "category";
+                const id = item.id;
+                const isDragging = draggedItem?.type === item.type && draggedItem?.id === id;
+                return (
+                  <div
+                    key={`${item.type}-${id}`}
+                    data-type={item.type}
+                    data-id={id}
+                    className={`transition-opacity ${isDragging ? "opacity-50" : ""} ${reordering ? "pointer-events-none" : ""}`}
+                    onDragOver={(e) => {
+                      e.preventDefault();
+                      e.dataTransfer.dropEffect = "move";
+                    }}
+                    onDrop={(e) => {
+                      e.preventDefault();
+                      const payload = e.dataTransfer.getData("text/plain");
+                      const [draggedType, draggedId] = payload.split(":");
+                      const toType = (e.currentTarget as HTMLElement).getAttribute("data-type") as "category" | "member";
+                      const toId = (e.currentTarget as HTMLElement).getAttribute("data-id");
+                      if (draggedType && draggedId && toType && toId) handleTeamOrderDrop(draggedType as "category" | "member", draggedId, toType, toId);
+                    }}
+                  >
+                    {isCategory ? (
+                      <Card
+                        className="overflow-hidden cursor-grab active:cursor-grabbing"
+                        draggable={!reordering}
+                        onDragStart={(e) => {
+                          if ((e.target as HTMLElement).closest?.("button")) {
+                            e.preventDefault();
+                            return;
+                          }
+                          e.dataTransfer.setData("text/plain", `category:${id}`);
+                          e.dataTransfer.effectAllowed = "move";
+                          setDraggedItem({ type: "category", id });
+                        }}
+                        onDragEnd={() => setDraggedItem(null)}
+                      >
+                        <div className="aspect-[3/4] relative bg-muted">
+                          {item.data.image_url ? (
+                            <img src={item.data.image_url} alt={item.data.name} className="size-full object-cover" />
+                          ) : (
+                            <div className="flex size-full items-center justify-center text-muted-foreground">
+                              <Users className="size-12" />
+                            </div>
+                          )}
+                          <div className="absolute left-2 top-2 rounded bg-black/50 p-1 text-white">
+                            <GripVertical className="size-4" aria-hidden />
+                          </div>
+                        </div>
+                        <CardContent className="p-3 flex items-center justify-between gap-2">
+                          <p className="font-medium truncate">{item.data.name}</p>
+                          <div className="flex shrink-0 items-center gap-1">
+                            <Button
+                              size="sm"
+                              variant="ghost"
+                              className="text-destructive shrink-0"
+                              onClick={() => handleDeleteCategory(id)}
+                              disabled={deletingCategoryId === id}
+                            >
+                              {deletingCategoryId === id ? <Loader2 className="size-4 animate-spin" /> : <Trash2 className="size-4" />}
+                            </Button>
+                          </div>
+                        </CardContent>
+                      </Card>
+                    ) : (
+                      <Card
+                        className="overflow-hidden cursor-grab active:cursor-grabbing"
+                        draggable={!reordering}
+                        onDragStart={(e) => {
+                          if ((e.target as HTMLElement).closest?.("button")) {
+                            e.preventDefault();
+                            return;
+                          }
+                          e.dataTransfer.setData("text/plain", `member:${id}`);
+                          e.dataTransfer.effectAllowed = "move";
+                          setDraggedItem({ type: "member", id });
+                        }}
+                        onDragEnd={() => setDraggedItem(null)}
+                      >
+                        <div className="aspect-[3/4] relative bg-muted">
+                          {item.data.image_url ? (
+                            <img src={item.data.image_url} alt={item.data.name} className="size-full object-cover" />
+                          ) : (
+                            <div className="flex size-full items-center justify-center text-muted-foreground">
+                              <Users className="size-12" />
+                            </div>
+                          )}
+                          <div className="absolute left-2 top-2 rounded bg-black/50 p-1 text-white">
+                            <GripVertical className="size-4" aria-hidden />
+                          </div>
+                        </div>
+                        <CardContent className="p-3">
+                          <div className="flex items-center justify-between gap-2">
+                            <p className="font-medium truncate">{item.data.name}</p>
+                            <div className="flex shrink-0 gap-1">
+                              <Button
+                                size="sm"
+                                variant="ghost"
+                                className="size-8 p-0"
+                                onClick={() => setEditingMember(item.data)}
+                                aria-label="Düzenle"
+                              >
+                                <Pencil className="size-4" />
+                              </Button>
+                              <Button
+                                size="sm"
+                                variant="ghost"
+                                className="size-8 p-0 text-destructive hover:text-destructive"
+                                onClick={() => handleDeleteMember(id)}
+                                disabled={deletingMemberId === id}
+                                aria-label="Sil"
+                              >
+                                {deletingMemberId === id ? (
+                                  <Loader2 className="size-4 animate-spin" />
+                                ) : (
+                                  <Trash2 className="size-4" />
+                                )}
+                              </Button>
+                            </div>
+                          </div>
+                        </CardContent>
+                      </Card>
+                    )}
                   </div>
-                </CardContent>
-              </Card>
-            ))}
-          </div>
+                );
+              })}
+            </div>
+          </>
         )}
       </div>
     </div>

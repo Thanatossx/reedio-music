@@ -119,6 +119,7 @@ create table if not exists public.team_categories (
   name text not null,
   image_url text,
   sort_order integer not null default 0,
+  section text not null default 'sanatci' check (section in ('yonetim', 'sanatci')),
   created_at timestamptz not null default now()
 );
 
@@ -145,12 +146,32 @@ create table if not exists public.team_members (
   created_at timestamptz not null default now()
 );
 
+-- Not: category_id ve section mevcut kurulumlara yukarıdaki do $$ blokları ile eklenir.
+
 -- team_members'a category_id ekle (yoksa)
 do $$
 begin
   if exists (select 1 from information_schema.tables where table_schema = 'public' and table_name = 'team_members')
      and not exists (select 1 from information_schema.columns where table_schema = 'public' and table_name = 'team_members' and column_name = 'category_id') then
     alter table public.team_members add column category_id uuid references public.team_categories(id) on delete set null;
+  end if;
+end $$;
+
+-- team_categories'a section ekle (yoksa)
+do $$
+begin
+  if exists (select 1 from information_schema.tables where table_schema = 'public' and table_name = 'team_categories')
+     and not exists (select 1 from information_schema.columns where table_schema = 'public' and table_name = 'team_categories' and column_name = 'section') then
+    alter table public.team_categories add column section text not null default 'sanatci' check (section in ('yonetim', 'sanatci'));
+  end if;
+end $$;
+
+-- team_members'a section ekle (yoksa)
+do $$
+begin
+  if exists (select 1 from information_schema.tables where table_schema = 'public' and table_name = 'team_members')
+     and not exists (select 1 from information_schema.columns where table_schema = 'public' and table_name = 'team_members' and column_name = 'section') then
+    alter table public.team_members add column section text not null default 'sanatci' check (section in ('yonetim', 'sanatci'));
   end if;
 end $$;
 
