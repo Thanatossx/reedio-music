@@ -113,7 +113,29 @@ create policy "Product images service role delete"
   on storage.objects for delete
   using (bucket_id = 'product-images' and auth.role() = 'service_role');
 
--- 5. team_members tablosu (Ekibimiz)
+-- 5. team_categories tablosu (Ekibimiz kategorileri: gruplar, bantlar vb.)
+create table if not exists public.team_categories (
+  id uuid primary key default gen_random_uuid(),
+  name text not null,
+  image_url text,
+  sort_order integer not null default 0,
+  created_at timestamptz not null default now()
+);
+
+alter table public.team_categories enable row level security;
+
+drop policy if exists "Team categories public read" on public.team_categories;
+create policy "Team categories public read"
+  on public.team_categories for select
+  using (true);
+
+drop policy if exists "Team categories service role full" on public.team_categories;
+create policy "Team categories service role full"
+  on public.team_categories for all
+  using (auth.role() = 'service_role')
+  with check (auth.role() = 'service_role');
+
+-- 6. team_members tablosu (Ekibimiz)
 create table if not exists public.team_members (
   id uuid primary key default gen_random_uuid(),
   name text not null,
@@ -122,6 +144,15 @@ create table if not exists public.team_members (
   sort_order integer not null default 0,
   created_at timestamptz not null default now()
 );
+
+-- team_members'a category_id ekle (yoksa)
+do $$
+begin
+  if exists (select 1 from information_schema.tables where table_schema = 'public' and table_name = 'team_members')
+     and not exists (select 1 from information_schema.columns where table_schema = 'public' and table_name = 'team_members' and column_name = 'category_id') then
+    alter table public.team_members add column category_id uuid references public.team_categories(id) on delete set null;
+  end if;
+end $$;
 
 alter table public.team_members enable row level security;
 
@@ -136,7 +167,7 @@ create policy "Team members service role full"
   using (auth.role() = 'service_role')
   with check (auth.role() = 'service_role');
 
--- 6. Storage: team-images bucket (3:4 fotoğraflar)
+-- 7. Storage: team-images bucket (3:4 fotoğraflar)
 insert into storage.buckets (id, name, public)
 values ('team-images', 'team-images', true)
 on conflict (id) do update set public = true;

@@ -17,6 +17,9 @@ export default async function TeamMemberPage({ params }: PageProps) {
   }
 
   const member = result.member;
+  const backHref = member.category_id
+    ? `/ekibimiz/kategori/${member.category_id}`
+    : "/ekibimiz";
 
   return (
     <div className="container mx-auto px-4 py-8 sm:px-6 lg:px-8 max-w-3xl">
@@ -26,7 +29,7 @@ export default async function TeamMemberPage({ params }: PageProps) {
         asChild
         className="mb-6 gap-2 text-muted-foreground hover:text-foreground"
       >
-        <Link href="/ekibimiz">
+        <Link href={backHref}>
           <ArrowLeft className="size-4" />
           Ekibimize geri dön
         </Link>

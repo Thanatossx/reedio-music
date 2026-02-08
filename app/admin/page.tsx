@@ -24,12 +24,19 @@ import {
 } from "@/app/actions/orders";
 import { getProducts, createProduct, deleteProduct, updateProductStock } from "@/app/actions/products";
 import { getContactMessages } from "@/app/actions/contact";
-import { getTeamMembers, createTeamMember, deleteTeamMember } from "@/app/actions/team";
+import {
+  getTeamMembers,
+  getTeamCategories,
+  createTeamMember,
+  deleteTeamMember,
+  createTeamCategory,
+  deleteTeamCategory,
+} from "@/app/actions/team";
 import type { OrderRow, OrderItemsJSON } from "@/lib/types/order";
 import { isNormalOrderItems } from "@/lib/types/order";
 import type { ProductRow } from "@/lib/types/product";
 import type { ContactMessageRow } from "@/lib/types/contact";
-import type { TeamMemberRow } from "@/lib/types/team";
+import type { TeamMemberRow, TeamCategoryRow } from "@/lib/types/team";
 import { toast } from "sonner";
 import {
   Loader2,
@@ -527,59 +534,186 @@ function AdminMessagesTab({
 
 // --- Ekibimiz sekmesi ---
 function AdminTeamTab({
+  categories,
   members,
-  onRefresh,
+  onRefreshCategories,
+  onRefreshMembers,
 }: {
+  categories: TeamCategoryRow[];
   members: TeamMemberRow[];
-  onRefresh: () => void;
+  onRefreshCategories: () => void;
+  onRefreshMembers: () => void;
 }) {
-  const [adding, setAdding] = React.useState(false);
-  const [deletingId, setDeletingId] = React.useState<string | null>(null);
+  const [addingMember, setAddingMember] = React.useState(false);
+  const [addingCategory, setAddingCategory] = React.useState(false);
+  const [deletingMemberId, setDeletingMemberId] = React.useState<string | null>(null);
+  const [deletingCategoryId, setDeletingCategoryId] = React.useState<string | null>(null);
 
-  const handleAdd = async (e: React.FormEvent<HTMLFormElement>) => {
+  const handleAddCategory = async (e: React.FormEvent<HTMLFormElement>) => {
     e.preventDefault();
     const form = e.currentTarget;
     const formData = new FormData(form);
-    setAdding(true);
+    setAddingCategory(true);
+    try {
+      const result = await createTeamCategory(formData);
+      if (result.ok) {
+        toast.success("Kategori eklendi.");
+        form.reset();
+        onRefreshCategories();
+      } else {
+        toast.error(result.error ?? "Eklenemedi.");
+      }
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Bir hata oluştu.");
+    } finally {
+      setAddingCategory(false);
+    }
+  };
+
+  const handleDeleteCategory = async (id: string) => {
+    if (!confirm("Bu kategoriyi silmek istediğinize emin misiniz? Kategorideki üyeler kategorisiz kalır.")) return;
+    setDeletingCategoryId(id);
+    const result = await deleteTeamCategory(id);
+    setDeletingCategoryId(null);
+    if (result.ok) {
+      toast.success("Kategori silindi.");
+      onRefreshCategories();
+      onRefreshMembers();
+    } else {
+      toast.error(result.error ?? "Silinemedi.");
+    }
+  };
+
+  const handleAddMember = async (e: React.FormEvent<HTMLFormElement>) => {
+    e.preventDefault();
+    const form = e.currentTarget;
+    const formData = new FormData(form);
+    setAddingMember(true);
     try {
       const result = await createTeamMember(formData);
       if (result.ok) {
         toast.success("Ekip üyesi eklendi.");
         form.reset();
-        onRefresh();
+        onRefreshMembers();
       } else {
         toast.error(result.error ?? "Eklenemedi.");
       }
     } catch (err) {
       const msg = err instanceof Error ? err.message : "Bir hata oluştu.";
       toast.error(msg);
-      console.error(err);
     } finally {
-      setAdding(false);
+      setAddingMember(false);
     }
   };
 
-  const handleDelete = async (id: string) => {
+  const handleDeleteMember = async (id: string) => {
     if (!confirm("Bu ekip üyesini silmek istediğinize emin misiniz?")) return;
-    setDeletingId(id);
+    setDeletingMemberId(id);
     const result = await deleteTeamMember(id);
-    setDeletingId(null);
+    setDeletingMemberId(null);
     if (result.ok) {
       toast.success("Ekip üyesi silindi.");
-      onRefresh();
+      onRefreshMembers();
     } else {
       toast.error(result.error ?? "Silinemedi.");
     }
   };
 
   return (
-    <div className="space-y-8">
+    <div className="space-y-10">
+      {/* Kategoriler (gruplar / bantlar) */}
+      <Card>
+        <CardHeader>
+          <CardTitle>Kategori Ekle (müzik grubu, bant vb.)</CardTitle>
+        </CardHeader>
+        <CardContent>
+          <form onSubmit={handleAddCategory} className="grid gap-4 sm:grid-cols-2">
+            <div className="space-y-2">
+              <Label htmlFor="category-name">Kategori adı</Label>
+              <Input
+                id="category-name"
+                name="name"
+                required
+                placeholder="Örn: Neurostatic"
+              />
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor="category-image">Fotoğraf (3:4 oran önerilir)</Label>
+              <Input
+                id="category-image"
+                name="image"
+                type="file"
+                accept="image/*"
+                required
+                className="cursor-pointer"
+              />
+            </div>
+            <div className="sm:col-span-2">
+              <Button type="submit" disabled={addingCategory}>
+                {addingCategory ? <Loader2 className="size-4 animate-spin" /> : "Kategori Ekle"}
+              </Button>
+            </div>
+          </form>
+        </CardContent>
+      </Card>
+
+      {categories.length > 0 && (
+        <div>
+          <h3 className="mb-2 font-semibold">Kategori listesi</h3>
+          <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+            {categories.map((c) => (
+              <Card key={c.id} className="overflow-hidden">
+                <div className="aspect-[3/4] relative bg-muted">
+                  {c.image_url ? (
+                    <img src={c.image_url} alt={c.name} className="size-full object-cover" />
+                  ) : (
+                    <div className="flex size-full items-center justify-center text-muted-foreground">
+                      <Users className="size-12" />
+                    </div>
+                  )}
+                </div>
+                <CardContent className="p-3 flex items-center justify-between gap-2">
+                  <p className="font-medium truncate">{c.name}</p>
+                  <Button
+                    size="sm"
+                    variant="ghost"
+                    className="text-destructive shrink-0"
+                    onClick={() => handleDeleteCategory(c.id)}
+                    disabled={deletingCategoryId === c.id}
+                  >
+                    {deletingCategoryId === c.id ? <Loader2 className="size-4 animate-spin" /> : <Trash2 className="size-4" />}
+                  </Button>
+                </CardContent>
+              </Card>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {/* Ekip üyesi ekle */}
       <Card>
         <CardHeader>
           <CardTitle>Ekip Üyesi Ekle</CardTitle>
         </CardHeader>
         <CardContent>
-          <form onSubmit={handleAdd} className="grid gap-4 sm:grid-cols-2">
+          <form onSubmit={handleAddMember} className="grid gap-4 sm:grid-cols-2">
+            <div className="space-y-2">
+              <Label htmlFor="team-category">Kategori</Label>
+              <select
+                id="team-category"
+                name="category_id"
+                required
+                className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+              >
+                <option value="">Seçin...</option>
+                {categories.map((c) => (
+                  <option key={c.id} value={c.id}>{c.name}</option>
+                ))}
+              </select>
+              {categories.length === 0 && (
+                <p className="text-xs text-muted-foreground">Önce bir kategori ekleyin.</p>
+              )}
+            </div>
             <div className="space-y-2">
               <Label htmlFor="team-name">İsim</Label>
               <Input
@@ -610,8 +744,8 @@ function AdminTeamTab({
               />
             </div>
             <div className="flex items-end">
-              <Button type="submit" disabled={adding}>
-                {adding ? <Loader2 className="size-4 animate-spin" /> : "Ekle"}
+              <Button type="submit" disabled={addingMember || categories.length === 0}>
+                {addingMember ? <Loader2 className="size-4 animate-spin" /> : "Ekle"}
               </Button>
             </div>
           </form>
@@ -646,10 +780,10 @@ function AdminTeamTab({
                       size="sm"
                       variant="ghost"
                       className="text-destructive hover:text-destructive shrink-0"
-                      onClick={() => handleDelete(m.id)}
-                      disabled={deletingId === m.id}
+                      onClick={() => handleDeleteMember(m.id)}
+                      disabled={deletingMemberId === m.id}
                     >
-                      {deletingId === m.id ? (
+                      {deletingMemberId === m.id ? (
                         <Loader2 className="size-4 animate-spin" />
                       ) : (
                         <Trash2 className="size-4" />
@@ -674,6 +808,7 @@ export default function AdminPage() {
   const [products, setProducts] = React.useState<ProductRow[]>([]);
   const [messages, setMessages] = React.useState<ContactMessageRow[]>([]);
   const [teamMembers, setTeamMembers] = React.useState<TeamMemberRow[]>([]);
+  const [teamCategories, setTeamCategories] = React.useState<TeamCategoryRow[]>([]);
   const [loading, setLoading] = React.useState(true);
   const [loginError, setLoginError] = React.useState("");
   const [tab, setTab] = React.useState("orders");
@@ -681,6 +816,11 @@ export default function AdminPage() {
   const loadTeamMembers = React.useCallback(async () => {
     const res = await getTeamMembers();
     if (res.ok && res.members) setTeamMembers(res.members);
+  }, []);
+
+  const loadTeamCategories = React.useCallback(async () => {
+    const res = await getTeamCategories();
+    if (res.ok && res.categories) setTeamCategories(res.categories);
   }, []);
 
   const loadOrders = React.useCallback(async () => {
@@ -711,7 +851,8 @@ export default function AdminPage() {
     loadProducts();
     loadMessages();
     loadTeamMembers();
-  }, [authenticated, loadOrders, loadProducts, loadMessages, loadTeamMembers]);
+    loadTeamCategories();
+  }, [authenticated, loadOrders, loadProducts, loadMessages, loadTeamMembers, loadTeamCategories]);
 
   const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -722,6 +863,7 @@ export default function AdminPage() {
       loadOrders();
       loadProducts();
       loadMessages();
+      loadTeamCategories();
       loadTeamMembers();
     } else {
       setLoginError("Şifre hatalı.");
@@ -805,7 +947,12 @@ export default function AdminPage() {
           <AdminProductsTab products={products} onRefresh={loadProducts} />
         </TabsContent>
         <TabsContent value="team">
-          <AdminTeamTab members={teamMembers} onRefresh={loadTeamMembers} />
+          <AdminTeamTab
+          categories={teamCategories}
+          members={teamMembers}
+          onRefreshCategories={loadTeamCategories}
+          onRefreshMembers={loadTeamMembers}
+        />
         </TabsContent>
         <TabsContent value="messages">
           <AdminMessagesTab messages={messages} onRefresh={loadMessages} />
